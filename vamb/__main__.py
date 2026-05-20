@@ -355,12 +355,8 @@ class GeneralOptions:
         # Outdir does not exist
         import os
         local_rank = int(os.environ.get("LOCAL_RANK", -1))
-        # 只有单卡或者主进程(rank 0)才去检查并报错，防止子进程并发冲突
         if out_dir.exists() and local_rank <= 0:
-            pass # 为了省事，我们这里直接把报错 pass 掉，允许覆盖写入
-            # 如果你不想覆盖，可以写 raise FileExistsError(out_dir)
-
-        # Outdir is in an existing parent dir
+            pass
         parent_dir = out_dir.parent
         if not parent_dir.is_dir():
             raise NotADirectoryError(parent_dir)
@@ -1623,11 +1619,10 @@ def predict_taxonomy(
         device = torch.device(f"cuda:{local_rank}" if cuda and local_rank != -1 else ("cuda" if cuda else "cpu"))
         teacher_model = teacher_model.to(device)
         
-        # 1. ==== 核心优化：预先计算骨干网络的特征 (Pooled Embeddings) ====
         logger.info("Precomputing teacher backbone embeddings to speed up training...")
         teacher_model.eval()
         embeddings_list = []
-        batch_size = 64  # 可以根据显存大小调节  # base=32
+        batch_size = 64  
         
         is_main = local_rank in [-1, 0]
         from tqdm import tqdm
@@ -1638,7 +1633,6 @@ def predict_taxonomy(
                 batch_seqs = sequences[i:i+batch_size]
                 inputs = tokenizer(batch_seqs, return_tensors="pt", padding=True, truncation=True, max_length=512).to(device)
                 inputs.pop("token_type_ids", None)
-                # 基于 Mistral/LLaMA 的 Causal LM Pooling (获取最后一个有效token的hidden states)
                 if hasattr(teacher_model, "model"):
                     outputs = teacher_model.model(**inputs)
                     hidden_states = outputs[0]
@@ -1656,7 +1650,6 @@ def predict_taxonomy(
                     else:
                         pooled_hidden_states = hidden_states[torch.arange(hidden_states.shape[0], device=hidden_states.device), sequence_lengths]
                 else:
-                    # 兼容基于 BERT 的提取
                     backbone = getattr(teacher_model, teacher_model.base_model_prefix)
                     outputs = backbone(**inputs)
                     pooled_hidden_states = outputs[1] if len(outputs) > 1 else outputs[0][:, 0, :]
@@ -1667,7 +1660,6 @@ def predict_taxonomy(
         if is_main:
             logger.info(f"Successfully precomputed {len(teacher_embeddings)} embeddings. Releasing backbone...")
         
-        # 2. ==== 提取分类头并释放 Backbone 显存 ====
         if hasattr(teacher_model, "score"):
             teacher_head = teacher_model.score
         elif hasattr(teacher_model, "classifier"):
@@ -1675,14 +1667,11 @@ def predict_taxonomy(
         else:
             raise AttributeError("Could not find classification head in teacher model.")
             
-        # 确保分类头可以计算梯度
         for param in teacher_head.parameters():
             param.requires_grad = True
             
-        # 将分类头放置到对应显卡
         teacher_head = teacher_head.to(device)
         
-        # 彻底删除庞大的骨干网络
         del teacher_model
         torch.cuda.empty_cache()
 
@@ -1691,7 +1680,7 @@ def predict_taxonomy(
     )
     dataloader_joint = vamb.taxvamb_encode.make_dataloader_concat_hloss(
         abundance, tnfs, lengths, targets, len(nodes), table_parent,
-        teacher_embeddings=teacher_embeddings, # 传入预计算的 Embeddings
+        teacher_embeddings=teacher_embeddings, 
         batchsize=taxonomy_options.basic.starting_batch_size,
     )
 
@@ -1711,14 +1700,14 @@ def predict_taxonomy(
             model.trainmodel(
                 dataloader_joint, nepochs=taxonomy_options.basic.num_epochs, modelfile=modelfile,
                 batchsteps=taxonomy_options.basic.batch_steps, 
-                teacher_model=teacher_head, # 注意：这里将 teacher_head= 改成了 teacher_model=
+                teacher_model=teacher_head, 
                 kd_alpha=getattr(taxonomy_options.basic, "kd_alpha", 0.5), kd_temp=getattr(taxonomy_options.basic, "kd_temp", 2.0)
             )
     else:
         model.trainmodel(
             dataloader_joint, nepochs=taxonomy_options.basic.num_epochs, modelfile=None,
             batchsteps=taxonomy_options.basic.batch_steps, 
-            teacher_model=teacher_head, # 注意：这里同样改为 teacher_model=
+            teacher_model=teacher_head, 
             kd_alpha=getattr(taxonomy_options.basic, "kd_alpha", 0.5), kd_temp=getattr(taxonomy_options.basic, "kd_temp", 2.0)
         )
     if local_rank != -1:
@@ -2022,13 +2011,10 @@ def run_taxonomy_predictor(opt: TaxometerOptions):
         abundance.matrix, composition.matrix, composition.metadata.lengths, composition.metadata.identifiers,
     )
     
-    # 获取 FASTA 路径传递给下方
     fasta_path = opt.composition.path.path if hasattr(opt.composition, 'path') else None
 
-    # 将 opt.basic 绑定额外参数（如果你没在 BasicTrainingOptions 里加的话，这里用打补丁的方式最快）
     import sys
-    # 手动解析命令行中未定义在 class 中的属性
-    # （正规做法是修改 BasicTrainingOptions，但这样直接赋值最快保证流程畅通）
+
     opt.basic.genomeocean = [sys.argv[i+1] for i, x in enumerate(sys.argv) if x == '--genomeocean'][0] if '--genomeocean' in sys.argv else None
     opt.basic.kd_alpha = float([sys.argv[i+1] for i, x in enumerate(sys.argv) if x == '--kd_alpha'][0]) if '--kd_alpha' in sys.argv else 0.5
     opt.basic.kd_temp = float([sys.argv[i+1] for i, x in enumerate(sys.argv) if x == '--kd_temp'][0]) if '--kd_temp' in sys.argv else 2.0
@@ -2041,7 +2027,7 @@ def run_taxonomy_predictor(opt: TaxometerOptions):
         out_dir=opt.general.out_dir,
         taxonomy_options=opt,
         cuda=opt.general.cuda,
-        fasta_path=fasta_path # 新增传参
+        fasta_path=fasta_path 
     )
 
 
@@ -2757,7 +2743,7 @@ def add_reclustering_arguments(subparser: argparse.ArgumentParser):
 
 
 def main():
-    # ==== 【新增】：初始化 DDP 分布式进程组 ====
+
     import os
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if local_rank != -1:
@@ -2775,11 +2761,10 @@ def main():
 
     Find documentation at https://github.com/RasmussenLab/vamb"""
     
-    # ==== 【修改】：只允许主进程输出日志 ====
     if local_rank in [-1, 0]:
         logger.add(sys.stderr, format=format_log)
     else:
-        logger.remove()  # 屏蔽其它子进程的输出，防止控制台刷屏
+        logger.remove()  
     logger.add(sys.stderr, format=format_log)
 
     parser = argparse.ArgumentParser(
@@ -2933,7 +2918,6 @@ Required arguments:
 
     args, unknown_args = parser.parse_known_args()
     
-    # 可选：如果你想知道 torchrun 到底偷偷塞了什么，可以打印出来看看
     if unknown_args and local_rank in [-1, 0]:
         print(f"⚠️ 忽略了来自 torchrun 的未知参数: {unknown_args}")
 
