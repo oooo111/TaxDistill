@@ -2,6 +2,8 @@
 
 **TaxDistill** is a tool for metagenomic classification and label correction. It leverages initial taxonomic labels, contig abundance data, and GenomeOcean references to improve classification accuracy.
 
+Example Marine datasets for testing can be downloaded from [Hugging Face](https://huggingface.co/datasets/rongye1/TaxDistill/tree/main).
+
 ## Parameters
 
 | Parameter | Description |
@@ -25,9 +27,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
      --master_port=29500 \
      vamb/__main__.py taxometer \
      --outdir your_dir \
-     --fasta your_data/contigs_oral.fna.gz \
-     --abundance_tsv your_data/abundances.tsv \
-     --taxonomy your_data/disk1/yerongye/TaxDistill/Taxnometer/vamb/data/Marine/mmseq2_results_taxometer_fixed.tsv \
+     --fasta /contigs_marine.fna.gz \
+     --abundance_tsv /abundances.tsv \
+     --taxonomy /Marine/mmseq2_results_taxometer.tsv \
      --genomeocean GenomeOcean/100M \
      --kd_alpha 0.3 \
      --kd_temp 4 \
