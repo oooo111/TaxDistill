@@ -30,18 +30,11 @@ from peft import LoraConfig, get_peft_model # 用于GenomeOcean的LoRA微调
 
 
 def knowledge_distillation_kl_loss(student_logits, teacher_logits, temperature=2.0):
-    """
-    计算KL散度 D_KL(P_GO || P_taxo)
-    """
-    # 【新增】：强制转换为 float32，防止精度溢出导致 NaN
+
     student_logits = student_logits.float()
     teacher_logits = teacher_logits.float()
-    
-    # 将logits转化为平滑后的对数概率分布
     log_p_student = F.log_softmax(student_logits / temperature, dim=-1)
     p_teacher = F.softmax(teacher_logits / temperature, dim=-1)
-    
-    # 计算 KL Divergence
     kl_loss = F.kl_div(log_p_student, p_teacher, reduction="batchmean") * (temperature ** 2)
     return kl_loss
 
@@ -102,7 +95,6 @@ def collate_fn_concat_hloss(num_categories: int, table_parent, batch):
     c = _torch.stack([i[2] for i in batch])
     d = _torch.stack([i[3] for i in batch])
     e = [i[4] for i in batch]
-    # 如果 batch 包含 Embeddings (长度为6)
     if len(batch[0]) > 5:
         embs = _torch.stack([i[5] for i in batch])
         return a, b, c, d, collate_fn_labels_hloss(num_categories, table_parent, e)[0], embs
@@ -164,7 +156,7 @@ def make_dataloader_labels_hloss(
 
 def make_dataloader_concat_hloss(
     rpkm, tnf, lengths, labels, N: int, table_parent: list[int],
-    teacher_embeddings=None,  # 改为接受 teacher_embeddings
+    teacher_embeddings=None,  
     no_filter: bool = True, batchsize: int = 256, destroy: bool = False, cuda: bool = False,
 ):
     (
@@ -1018,7 +1010,6 @@ class VAMB2Label(_nn.Module):
         is_ddp = local_rank != -1
         is_main = local_rank in [-1, 0]
 
-        # 分布式特有：每个 Epoch 需要告诉 Sampler 打乱种子
         if is_ddp and hasattr(data_loader, 'sampler') and hasattr(data_loader.sampler, 'set_epoch'):
             data_loader.sampler.set_epoch(epoch)
 
@@ -1054,7 +1045,6 @@ class VAMB2Label(_nn.Module):
 
             is_last_step = ((i + 1) % accumulation_steps == 0) or ((i + 1) == len(data_loader))
 
-            # 【性能优化】在梯度累积时，关闭跨卡同步，直到最后一步再同步（极大提升速度）
             if is_ddp and not is_last_step:
                 sync_context = forward_model.no_sync()
                 sync_context_t = forward_teacher.no_sync() if forward_teacher else contextlib.nullcontext()
@@ -1068,14 +1058,10 @@ class VAMB2Label(_nn.Module):
                 loss_sup_student = loss_sup_student.mean()
 
                 if forward_teacher is not None and seqs_in is not None:
-                    # 此时的 seqs_in 已经是预先提取好的 Embedding 张量了
                     if self.usecuda:
                         seqs_in = seqs_in.to(dev)
                     
-                    # 直接将 Embedding 传递给提取出来的分类头
                     teacher_outputs = forward_teacher(seqs_in)
-                    
-                    # 适配不同分类头的输出结构
                     if hasattr(teacher_outputs, 'logits'):
                         teacher_logits = teacher_outputs.logits
                     elif isinstance(teacher_outputs, tuple):
@@ -1084,22 +1070,13 @@ class VAMB2Label(_nn.Module):
                         teacher_logits = teacher_outputs
                         
                     teacher_logits = teacher_logits.float()
-
-                    # ==========================================================
-                    # 【核心修改 1】：解耦 Teacher 和 Student 的 Loss，并使用 .detach()
-                    # ==========================================================
-                    
-                    # 1. Teacher 专心拟合真实标签（不受 kd_alpha 缩放影响）
                     loss_sup_teacher, _ = self.calc_loss(labels_in, teacher_logits)
                     loss_sup_teacher = loss_sup_teacher.mean()
 
-                    # 2. 计算 KD Loss 时，必须对 teacher_logits 进行截断 (.detach())，防止学生拉垮老师！
                     loss_kd = knowledge_distillation_kl_loss(labels_out, teacher_logits.detach(), temperature=kd_temp)
                     
-                    # 3. Student 的损失 = 真实标签损失 * kd_alpha + 蒸馏损失 * (1 - kd_alpha)
                     loss_student = loss_sup_student * kd_alpha + loss_kd * (1.0 - kd_alpha)
-                    
-                    # 4. 总 Loss 直接相加（因为上面已经截断了计算图，这里相加不会导致互相干扰）
+                
                     loss_total_step = loss_student + loss_sup_teacher
                     
                     epoch_kdloss += loss_kd.item()
@@ -1146,11 +1123,6 @@ class VAMB2Label(_nn.Module):
         teacher_model=None, tokenizer=None, kd_alpha=0.5, kd_temp=2.0
     ):
         if teacher_model is not None:
-            # ==========================================================
-            # 【核心修改 2】：使用参数分组(Parameter Groups)设置不同的学习率
-            # 小模型(Student)从头训练，需要较大初始学习率 (比如 1e-3)
-            # 大模型(Teacher)使用 LoRA 微调，需要较小学习率 (比如 1e-4)
-            # ==========================================================
             optimizer = _torch.optim.AdamW([
                 {'params': self.parameters(), 'lr': 1e-3},
                 {'params': [p for p in teacher_model.parameters() if p.requires_grad], 'lr': 1e-4}
@@ -1158,18 +1130,13 @@ class VAMB2Label(_nn.Module):
         else:
             optimizer = dadaptation.DAdaptAdam(self.parameters(), lr=1, decouple=True)
 
-        # 定义余弦退火学习率调度器
-        # T_max 设为总 epoch 数，eta_min 为退火到的最小学习率（这里设为 1e-6）
         scheduler = _torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=nepochs, eta_min=1e-6)
-
-        # ==== DDP 模型包装 ====
         import os
         local_rank = int(os.environ.get("LOCAL_RANK", -1))
         is_ddp = local_rank != -1
         is_main = local_rank in [-1, 0]
 
         if is_ddp:
-            # 找到对应卡上的模型并打包
             forward_model = _torch.nn.parallel.DistributedDataParallel(self, device_ids=[local_rank], find_unused_parameters=False)
             if teacher_model is not None:
                 forward_teacher = _torch.nn.parallel.DistributedDataParallel(teacher_model, device_ids=[local_rank], find_unused_parameters=False)
@@ -1190,12 +1157,9 @@ class VAMB2Label(_nn.Module):
                 forward_model=forward_model, forward_teacher=forward_teacher
             )
             
-            # 每个 Epoch 结束后更新学习率
             scheduler.step()
 
-            # 在主进程打印当前的学习率，方便观察退火过程
             if is_main and (epoch + 1) % 10 == 0:
-                # 获取学生模型的学习率打印展示（如果你想也可以打印组[1]的老师学习率）
                 current_lr_student = optimizer.param_groups[0]['lr']
                 if teacher_model is not None:
                     current_lr_teacher = optimizer.param_groups[1]['lr']
