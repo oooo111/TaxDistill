@@ -36,4 +36,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
      -pt 64 \
      --cuda
 
+## Paper
+
+Our paper is available on arXiv: https://arxiv.org/abs/2605.28868
 
