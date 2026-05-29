@@ -4,6 +4,9 @@
 
 Example Marine datasets for testing can be downloaded from [Hugging Face](https://huggingface.co/datasets/rongye1/TaxDistill/tree/main).
 
+## Paper
+Our paper is available on arXiv: https://arxiv.org/abs/2605.28868
+
 ## Parameters
 
 | Parameter | Description |
@@ -36,7 +39,4 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
      -pt 64 \
      --cuda
 
-## Paper
-
-Our paper is available on arXiv: https://arxiv.org/abs/2605.28868
 
