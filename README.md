@@ -2,6 +2,10 @@
 
 **TaxDistill** is a tool for metagenomic classification and label correction. It leverages initial taxonomic labels, contig abundance data, and GenomeOcean references to improve classification accuracy.
 
+TaxDistill is developed based on Taxometer, which is implemented in the VAMB framework. The original Taxometer/VAMB repository is available at: https://github.com/RasmussenLab/vamb.
+
+Our work extends Taxometer by introducing GenomeOcean-based knowledge distillation to improve the reliability of metagenomic taxonomic annotation.
+
 Example Marine datasets for testing can be downloaded from [Hugging Face](https://huggingface.co/datasets/rongye1/TaxDistill/tree/main).
 
 ## Paper
