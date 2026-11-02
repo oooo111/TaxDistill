@@ -38,7 +38,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
      --abundance_tsv /abundances.tsv \
      --taxonomy /Marine/mmseq2_marine_taxonomy.tsv \
      --genomeocean GenomeOcean/100M \
-     --kd_alpha 0.3 \
+     --kd_alpha 0.5 \
      --kd_temp 4 \
      -pt 64 \
      --cuda
