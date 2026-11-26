@@ -69,7 +69,7 @@ Kraken2： /disk1/yerongye/TaxDistill/Taxnometer/vamb/data/Gastrointenstinal/Kra
 
 ## 三个数据库的下载命令
 
-以下只记录下载方法；**Metabuli和MMseqs2下载的是固定R226的建库原料，下载后仍需建立各自索引**。
+以下只记录下载方法；**Metabuli和MMseqs2下载的是固定R226的建库数据，下载后仍需建立各自索引**。
 
 ```bash
 unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY ftp_proxy FTP_PROXY
